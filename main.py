@@ -1,450 +1,177 @@
 import pandas as pd
-
 import sys
 import os
-
 from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import KNeighborsClassifier
 
-from colorama import Fore, Style, init
-
-
-init(autoreset=True)
-
-red = Fore.RED
-blue = Fore.BLUE
-green = Fore.GREEN
-cyan = Fore.CYAN
-yellow = Fore.YELLOW
-reset = Style.RESET_ALL
+from kivy.app import App
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.spinner import Spinner
+from kivy.uix.textinput import TextInput
+from kivy.uix.label import Label
+from kivy.uix.button import Button
+from kivy.core.window import Window
 
 
 def resource_path(relative_path):
     try:
         base_path = sys._MEIPASS
-    except Exception:
+    except AttributeError:
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
 
 
+# Chargement et préparation des données + modèle
 df = pd.read_csv(resource_path("titanic.csv"))
-
 df.drop(["PassengerId", "Name", "Ticket", "Cabin"], axis=1, inplace=True)
-
 df["Embarked"].fillna("S", inplace=True)
-
-ages = df.groupby(by="Pclass")["Age"].median()
-age_1 = ages[1]
-age_2 = ages[2]
-age_3 = ages[3]
+median_ages = df.groupby("Pclass")["Age"].median()
 
 
-def fill_age(row):
+def imputer_age(row):
     if pd.isnull(row["Age"]):
-        if row["Pclass"] == 1:
-            return age_1
-        elif row["Pclass"] == 2:
-            return age_2
-        else:
-            return age_3
-    else:
-        return row["Age"]
+        return median_ages[row["Pclass"]]
+    return row["Age"]
 
 
-df["Age"] = df.apply(fill_age, axis=1)
-
-
-def fill_sex(data):
-    return 1 if data == "male" else 0
-
-
-df["Sex"] = df["Sex"].apply(fill_sex)
-
+df["Age"] = df.apply(imputer_age, axis=1)
+df["Sex"] = df["Sex"].map({"male": 1, "female": 0})
 df = pd.get_dummies(df, columns=["Embarked"], drop_first=True)
-
-x = df.drop("Survived", axis=1)
+X = df.drop("Survived", axis=1)
 y = df["Survived"]
-
-sc = StandardScaler()
-x = sc.fit_transform(x)
-
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
 model = KNeighborsClassifier(n_neighbors=10)
-model.fit(x, y)
+model.fit(X_scaled, y)
+features = list(X.columns)
 
-features = list(df.drop("Survived", axis=1).columns)
-
-
-def get_embarked_vars(city_num):
-    if city_num == 1:
-        return (1, 0, 0)  # Southampton
-    elif city_num == 2:
-        return (0, 1, 0)  # Cherbourg
-    return (0, 0, 1)  # Queenstown
+embarked_map = {
+    1: (0, 0),  # Southampton
+    2: (1, 0),  # Cherbourg
+    3: (0, 1),  # Queenstown
+}
 
 
-def predict_survival(
-        pclass, sex, age, sibsp, parch, embarked_c, embarked_q, embarked_s):
-    mean_prices = [0, 84, 20, 13]
-    fare = mean_prices[pclass]
-    input_data = pd.DataFrame({
+def predire_survie(pclass, sexe, age, sibsp, parch, embarked_c, embarked_q):
+    moyennes_tarifs = {1: 84, 2: 20, 3: 13}
+    tarif = moyennes_tarifs.get(pclass, 0)
+    data = pd.DataFrame({
         "Pclass": [pclass],
-        "Sex": [sex],
+        "Sex": [sexe],
         "Age": [age],
         "SibSp": [sibsp],
         "Parch": [parch],
-        "Fare": [fare],
+        "Fare": [tarif],
         "Embarked_C": [embarked_c],
         "Embarked_Q": [embarked_q],
-        "Embarked_S": [embarked_s]
     })
-
-    input_data = input_data[features]
-
-    input_data = sc.transform(input_data)
-
-    prediction = model.predict(input_data)
-
-    if prediction[0] == 1:
-        return True
-    return False
+    data = data[features]
+    data_scaled = scaler.transform(data)
+    prediction = model.predict(data_scaled)
+    return prediction[0] == 1
 
 
-def print_person_info(
-        pclass, sex, age, sibsp, parch, embarked_c, embarked_q, result, lang):
-    str(age)
-    if sex == 1:
-        if lang == 'ru':
-            sex_description = 'мужчиной'
-        elif lang == 'ua':
-            sex_description = 'чоловіком'
-        elif lang == 'fr':
-            sex_description = 'un homme'
-        else:
-            sex_description = 'a male'
-    else:
-        if lang == 'ru':
-            sex_description = 'женщиной'
-        elif lang == 'ua':
-            sex_description = 'жінкою'
-        elif lang == 'fr':
-            sex_description = 'une femme'
-        else:
-            sex_description = 'a female'
+class TitanicApp(App):
+    def build(self):
+        Window.size = (500, 600)
+        self.title = "Prédiction de survie Titanic"
 
-    if embarked_c:
-        city = "Шербура" if lang == 'ru' or lang == 'ua' else "Cherbourg"
-    elif embarked_q:
-        city = "Квинстауна" if lang == 'ru' or lang == 'ua' else "Queenstown"
-    else:
-        city = "Саутгемптона" if lang == 'ru' or lang == 'ua' else "Southampton"
+        main_layout = BoxLayout(orientation="vertical", padding=10, spacing=10)
 
-    if result:
-        if lang == 'ru':
-            result_text = "выжил"
-        elif lang == 'ua':
-            result_text = "пережи"
-        elif lang == 'fr':
-            result_text = "aurait survécu"
-        else:
-            result_text = "would survive"
-        result_text = f"{green}{result_text}"
-    else:
-        if lang == 'ru':
-            result_text = "не выжил"
-        elif lang == 'ua':
-            result_text = "не пережи"
-        elif lang == 'fr':
-            result_text = "n'aurait pas survécu"
-        else:
-            result_text = "wouldn't survive"
-        result_text = f"{red}{result_text}"
+        # Champs de saisie et sélection
+        # Classe
+        main_layout.add_widget(Label(text="Classe (1, 2 ou 3) :", size_hint_y=None, height=30))
+        self.pclass_input = Spinner(text="1", values=("1", "2", "3"), size_hint_y=None, height=40)
+        main_layout.add_widget(self.pclass_input)
 
-    description = (
-        f"   Этот пассажир был {yellow}{sex_description}{reset} и "
-        f"принадлежал к {yellow}{pclass}{reset} классу. "
-        f"Ему было {yellow}{age}{reset} лет. У него было {yellow}{sibsp}{reset} "
-        f"друзей и {yellow}{parch}{reset} родственников на борту. "
-        f"Он отправился из {yellow}{city}{reset}. "
-        f"По результатам модели, он бы {result_text}{reset}." if lang == 'ru' and sex == 1 else
+        # Sexe
+        main_layout.add_widget(Label(text="Sexe :", size_hint_y=None, height=30))
+        self.sexe_input = Spinner(text="Homme", values=("Homme", "Femme"), size_hint_y=None, height=40)
+        main_layout.add_widget(self.sexe_input)
 
-        f"   Этот пассажир был {yellow}{sex_description}{reset} и "
-        f"принадлежал к {yellow}{pclass}{reset} классу. "
-        f"Емa было {yellow}{age}{reset} лет. У неё было {yellow}{sibsp}{reset} "
-        f"друзей и {yellow}{parch}{reset} родственников на борту. "
-        f"Она отправилась из {yellow}{city}{reset}. "
-        f"По результатам модели, она бы {result_text}а{reset}." if lang == 'ru' and sex == 0 else
+        # Age
+        main_layout.add_widget(Label(text="Âge (0-120) :", size_hint_y=None, height=30))
+        self.age_input = TextInput(text="30", multiline=False, input_filter="int", size_hint_y=None, height=40)
+        main_layout.add_widget(self.age_input)
 
+        # SibSp
+        main_layout.add_widget(Label(text="Nombre d'amis à bord (0-20) :", size_hint_y=None, height=30))
+        self.sibsp_input = TextInput(text="0", multiline=False, input_filter="int", size_hint_y=None, height=40)
+        main_layout.add_widget(self.sibsp_input)
 
-        f"   Ця особа була {yellow}{sex_description}{reset} та "
-        f"належала до {yellow}{pclass}{reset} класу. "
-        f"Його вік складав {yellow}{age}{reset} років. "
-        f"У неї було {yellow}{sibsp}{reset} друзів "
-        f"і {yellow}{parch}{reset} родичів на борту. "
-        f"Він відправився з {yellow}{city}{reset}. "
-        f"За результатами моделі, він би {result_text}в{reset}." if lang == 'ua' and sex == 1 else
+        # Parch
+        main_layout.add_widget(Label(text="Nombre de membres de la famille (0-20) :", size_hint_y=None, height=30))
+        self.parch_input = TextInput(text="0", multiline=False, input_filter="int", size_hint_y=None, height=40)
+        main_layout.add_widget(self.parch_input)
 
-        f"   Ця особа була {yellow}{sex_description}{reset} та "
-        f"належала до {yellow}{pclass}{reset} класу. "
-        f"Її вік складав {yellow}{age}{reset} років. "
-        f"У неї було {yellow}{sibsp}{reset} друзів "
-        f"і {yellow}{parch}{reset} родичів на борту. "
-        f"Вона відправилась з {yellow}{city}{reset}. "
-        f"За результатами моделі, вона би {result_text}ла{reset}." if lang == 'ua' and sex == 0 else
+        # Ville d'embarquement
+        main_layout.add_widget(Label(text="Ville d'embarquement :", size_hint_y=None, height=30))
+        self.embarked_input = Spinner(text="Southampton", values=("Southampton", "Cherbourg", "Queenstown"), size_hint_y=None, height=40)
+        main_layout.add_widget(self.embarked_input)
 
+        # Bouton prédiction
+        self.pred_button = Button(text="Prédire la survie", size_hint_y=None, height=50)
+        self.pred_button.bind(on_press=self.on_predict)
+        main_layout.add_widget(self.pred_button)
 
-        f"   Ce passager était {yellow}{sex_description}{reset} "
-        f"appartennant à la classe numéro {yellow}{pclass}{reset}. "
-        f"Il avait {yellow}{age}{reset} ans. "
-        f"Il avait {yellow}{sibsp}{reset} amis "
-        f"et {yellow}{parch}{reset} membres de la famille à bord. "
-        f"Il a embarqué à {yellow}{city}{reset}. "
-        f"Selon le modèle, il {result_text}{reset}." if lang == 'fr' and sex == 1 else
+        # Label résultat
+        self.result_label = Label(text="", size_hint_y=None, height=120)
+        main_layout.add_widget(self.result_label)
 
-        f"   Ce passager était {yellow}{sex_description}{reset} "
-        f"appartennant à la classe numéro {yellow}{pclass}{reset}. "
-        f"Elle avait {yellow}{age}{reset} ans. "
-        f"Elle avait {yellow}{sibsp}{reset} amis "
-        f"et {yellow}{parch}{reset} membres de la famille à bord. "
-        f"Elle a embarqué à {yellow}{city}{reset}. "
-        f"Selon le modèle, elle {result_text}{reset}." if lang == 'fr' and sex == 0 else
+        # Bouton reset
+        self.reset_button = Button(text="Réinitialiser", size_hint_y=None, height=40)
+        self.reset_button.bind(on_press=self.on_reset)
+        main_layout.add_widget(self.reset_button)
 
+        return main_layout
 
-        f"   This passenger was a {yellow}{sex_description}{reset}, "
-        f"belonging to class {yellow}{pclass}{reset}. "
-        f"His age was {yellow}{age}{reset}. "
-        f"He had {yellow}{sibsp}{reset} friends "
-        f"and {yellow}{parch}{reset} family members aboard. "
-        f"He embarked in {yellow}{city}{reset}. "
-        f"According to the model, he {result_text}{reset}." if sex == 1 else
-
-        f"   This passenger was a {yellow}{sex_description}{reset}, "
-        f"belonging to class {yellow}{pclass}{reset}. "
-        f"Her age was {yellow}{age}{reset}. "
-        f"She had {yellow}{sibsp}{reset} friends "
-        f"and {yellow}{parch}{reset} family members aboard. "
-        f"She embarked in {yellow}{city}{reset}. "
-        f"According to the model, she {result_text}{reset}."
-    )
-
-    print(f"\n{description}\n")
-
-
-def get_user_input():
-    global lang
-
-    if lang == 'ru':
-        messages = [
-            "Введите класс каюты (1, 2 или 3): ",
-            "Введите пол (1 для мужского, 0 для женского): ",
-            "Введите возраст: ",
-            "Введите количество друзей на борту: ",
-            "Введите количество родственников на борту: ",
-            "Выберите город отправления:\n1 - Саутгемптон\n2 - Шербур\n3 - Квинстаун",
-            "Введите номер города (1, 2 или 3): ",
-            "Хотите проверить ещё одного пассажира? (да/нет): "]
-
-    elif lang == 'ua':
-        messages = [
-            "Введіть клас каюти (1, 2 або 3): ",
-            "Введіть стать (1 для чоловіків, 0 для жінок): ",
-            "Введіть вік: ",
-            "Введіть кількість друзів на борту: ",
-            "Введіть кількість родичів на борту: ",
-            "Виберіть місто відправлення:\n1 - Саутгемптон\n2 - Шербур\n3 - Квінстаун",
-            "Введіть номер міста (1, 2 або 3): ",
-            "Бажаєте перевірити ще одного пасажира? (так/ні): "
-        ]
-
-    elif lang == 'fr':
-        messages = [
-            "Entrez la classe (1, 2 ou 3): ",
-            "Entrez le sexe (1 pour l'homme, 0 pour la femme): ",
-            "Entrez l'âge: ",
-            "Entrez le nombre d'amis à bord: ",
-            "Entrez le nombre de membres de la famille: ",
-            "Choisissez la ville d'embarquement:\n1 - Southampton\n2 - Cherbourg\n3 - Queenstown",
-            "Entrez le numéro de la ville (1, 2 ou 3): ",
-            "Voulez-vous vérifier un autre passager? (oui/non): "
-        ]
-
-    else:
-        messages = [
-            "Enter cabin class (1, 2, or 3): ",
-            "Enter gender (1 for male, 0 for female): ",
-            "Enter age: ",
-            "Enter number of friends on board: ",
-            "Enter number of relatives on board: ",
-            "Select departure city:\n1 - Southampton\n2 - Cherbourg\n3 - Queenstown",
-            "Enter city number (1, 2, or 3): ",
-            "Do you want to check another passenger? (yes/no): "
-        ]
-
-    if lang == 'ru':
-        error_messages = [
-            "Неправильный ввод. Класс каюты должен быть 1, 2 или 3.",
-            "Неправильный ввод. Пол должен быть 1 для мужского или 0 для женского.",
-            "Неправильный ввод. Возраст должен быть положительным числом.",
-            "Неправильный ввод. Количество друзей на борту должно быть неотрицательным числом.",
-            "Неправильный ввод. Количество родственников на борту должно быть неотрицательным числом.",
-            "Неправильный ввод. Номер города должен быть 1, 2 или 3."
-        ]
-
-    elif lang == 'ua':
-        error_messages = [
-            "Неправильне введення. Клас каюти повинен бути 1, 2 або 3.",
-            "Неправильне введення. Стать повинна бути 1 для чоловіків або 0 для жінок.",
-            "Неправильне введення. Вік повинен бути додатним числом.",
-            "Неправильне введення. Кількість друзів на борту повинна бути невід'ємним числом.",
-            "Неправильне введення. Кількість родичів на борту повинна бути невід'ємним числом.",
-            "Неправильне введення. Номер міста повинен бути 1, 2 або 3."
-        ]
-
-    elif lang == 'fr':
-        error_messages = [
-            "Cette réponse n'existe pas. La classe doit être 1, 2 ou 3.",
-            "Cette réponse n'existe pas. Le sexe doit être 1 pour l'homme ou 0 pour la femme.",
-            "Cette réponse n'existe pas. L'âge doit être un nombre positif.",
-            "Cette réponse n'existe pas. Le nombre d'amis à bord doit être un nombre positif.",
-            "Cette réponse n'existe pas. Le nombre de membres de la famille à bord doit être un nombre positif.",
-            "Cette réponse n'existe pas. Le numéro de la ville doit être 1, 2 ou 3."
-        ]
-
-    else:
-        error_messages = [
-            "Invalid input. Cabin class must be 1, 2, or 3.",
-            "Invalid input. Gender must be 1 for male or 0 for female.",
-            "Invalid input. Age must be a positive number.",
-            "Invalid input. Number of friends on board must be a non-negative number.",
-            "Invalid input. Number of relatives on board must be a non-negative number.",
-            "Invalid input. City number must be 1, 2, or 3."
-        ]
-
-    while True:
-
-        while True:
-            try:
-                pclass = int(input(messages[0]).strip())
-                if pclass not in [1, 2, 3]:
-                    raise ValueError
-                break
-            except ValueError:
-                print(f"{red}{error_messages[0]}\n")
-                continue
-
-        while True:
-            try:
-                sex = int(input(messages[1]).strip())
-                if sex not in [0, 1]:
-                    raise ValueError
-                break
-            except ValueError:
-                print(f"{red}{error_messages[1]}\n")
-                continue
-
-        while True:
-            try:
-                age = int(input(messages[2]).strip())
-                if age < 0 or age > 120:
-                    raise ValueError
-                break
-            except ValueError:
-                print(f"{red}{error_messages[2]}\n")
-                continue
-
-        while True:
-            try:
-                sibsp = int(input(messages[3]).strip())
-                if sibsp < 0 or sibsp > 20:
-                    raise ValueError
-                break
-            except ValueError:
-                print(f"{red}{error_messages[3]}\n")
-                continue
-
-        while True:
-            try:
-                parch = int(input(messages[4]).strip())
-                if parch < 0 or parch > 20:
-                    raise ValueError
-                break
-            except ValueError:
-                print(f"{red}{error_messages[4]}\n")
-                continue
-
-        print(messages[5])
+    def on_predict(self, instance):
+        # Récupérer et valider les données
         try:
-            city_num = input(messages[6]).strip()
-            city_num = int(city_num) if city_num else 1
-            if city_num not in [1, 2, 3]:
-                raise ValueError
-        except ValueError:
-            print(f"{red}{error_messages[5]}")
-            continue
+            pclass = int(self.pclass_input.text)
+            sexe = 1 if self.sexe_input.text == "Homme" else 0
+            age = int(self.age_input.text)
+            sibsp = int(self.sibsp_input.text)
+            parch = int(self.parch_input.text)
+            embarked_str = self.embarked_input.text
+            if not (1 <= pclass <= 3):
+                raise ValueError("La classe doit être 1, 2 ou 3.")
+            if not (0 <= age <= 120):
+                raise ValueError("L'âge doit être entre 0 et 120.")
+            if not (0 <= sibsp <= 20):
+                raise ValueError("Le nombre d'amis doit être entre 0 et 20.")
+            if not (0 <= parch <= 20):
+                raise ValueError("Le nombre de membres de la famille doit être entre 0 et 20.")
+        except ValueError as e:
+            self.result_label.text = f"Erreur de saisie : {e}"
+            return
 
-        embarked_s, embarked_c, embarked_q = get_embarked_vars(city_num)
+        # Map ville vers colonnes embarquées
+        ville_num = {"Southampton": 1, "Cherbourg": 2, "Queenstown": 3}[embarked_str]
+        embarked_c, embarked_q = embarked_map[ville_num]
 
-        result = predict_survival(
-            pclass, sex, age, sibsp, parch,
-            embarked_c, embarked_q, embarked_s)
-        print_person_info(
-            pclass, sex, age, sibsp, parch,
-            embarked_c, embarked_q, result, lang)
+        survie = predire_survie(pclass, sexe, age, sibsp, parch, embarked_c, embarked_q)
 
-        cont = input(f"{cyan}{messages[7]}{reset}").strip().lower()
-        if cont not in ['да', 'yes', 'oui', 'так']:
-            break
-        print("")
+        sexe_str = "un homme" if sexe == 1 else "une femme"
+        ville = embarked_str
+        survie_str = "aurait survécu" if survie else "n'aurait pas survécu"
+
+        self.result_label.text = (
+            f"Ce passager était {sexe_str}, de la classe {pclass}.\n"
+            f"Il/elle avait {age} ans, avec {sibsp} amis et {parch} membres de sa famille à bord.\n"
+            f"Il/elle a embarqué à {ville}.\n"
+            f"Selon le modèle, il/elle {survie_str}."
+        )
+
+    def on_reset(self, instance):
+        self.pclass_input.text = "1"
+        self.sexe_input.text = "Homme"
+        self.age_input.text = "30"
+        self.sibsp_input.text = "0"
+        self.parch_input.text = "0"
+        self.embarked_input.text = "Southampton"
+        self.result_label.text = ""
 
 
 if __name__ == "__main__":
-    print("\n\n\n\n\n\n\n\n")
-
-    lang_choice = input(
-        f"{yellow}ru - Русский, ua - Українська, fr - Français, en -"
-        f" English : {reset}").strip()
-
-    if (
-        lang_choice == 'ru' or lang_choice == 'ua'
-        or lang_choice == 'fr' or lang_choice == 'en'
-    ):
-        lang = lang_choice
-        print("")
-
-    else:
-        while True:
-            lang_choice = input(
-                f"{yellow}ru - Русский, ua - Українська, fr - Français, en - "
-                f"English : {reset}").strip()
-
-            if (
-                lang_choice == 'ru' or lang_choice == 'ua' or
-                lang_choice == 'fr' or lang_choice == 'en'
-            ):
-                lang = lang_choice
-                break
-
-            print("")
-
-    if lang == 'ru':
-        print(
-            f"\n{cyan}Программа для предсказания выживания (или нет XD) "
-            "пассажиров Титаника.\nВыжил бы ты на титанике? - заполни "
-            "анкету и узнай с точностью до 80%!\n")
-    elif lang == 'ua':
-        print(
-            f"\n{cyan}Програма для передбачення виживання (чи ні XD) пасажирів"
-            " Титаніка.\nЧи вижив би ти на Титаніку? - заповни анкету і"
-            " дізнайся з точністю до 80%!\n")
-    elif lang == 'fr':
-        print(
-            f"\n{cyan}Un programme pour prédire la survie (ou non XD) des"
-            " passagers du Titanic.\nAurais-tu survécu sur le Titanic? - finis"
-            " ce questionnaire et tu auras la réponse avec une précision "
-            "jusqu'à 80%!\n")
-    else:
-        print(
-            f"\n{cyan}A program to predict the survival (or not XD) of Titanic"
-            " passengers.\nWould you have survived on the Titanic? - fill out"
-            " the questionnaire and find out with up to 80% accuracy!\n")
-
-    get_user_input()
+    TitanicApp().run()

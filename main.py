@@ -1,6 +1,9 @@
+# TitanicApp avec probabilité de survie, historique, passager aléatoire et mode sombre/clair
+
 import pandas as pd
 import sys
 import os
+import random
 from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import KNeighborsClassifier
 
@@ -11,6 +14,9 @@ from kivy.uix.textinput import TextInput
 from kivy.uix.label import Label
 from kivy.uix.button import Button
 from kivy.core.window import Window
+from kivy.uix.scrollview import ScrollView
+from kivy.uix.togglebutton import ToggleButton
+from kivy.uix.progressbar import ProgressBar
 
 
 def resource_path(relative_path):
@@ -46,13 +52,13 @@ model.fit(X_scaled, y)
 features = list(X.columns)
 
 embarked_map = {
-    1: (0, 0),  # Southampton
-    2: (1, 0),  # Cherbourg
-    3: (0, 1),  # Queenstown
+    "Southampton": (0, 0),
+    "Cherbourg": (1, 0),
+    "Queenstown": (0, 1),
 }
 
 
-def predire_survie(pclass, sexe, age, sibsp, parch, embarked_c, embarked_q):
+def predire_survie_proba(pclass, sexe, age, sibsp, parch, embarked_c, embarked_q):
     moyennes_tarifs = {1: 84, 2: 20, 3: 13}
     tarif = moyennes_tarifs.get(pclass, 0)
     data = pd.DataFrame({
@@ -67,110 +73,121 @@ def predire_survie(pclass, sexe, age, sibsp, parch, embarked_c, embarked_q):
     })
     data = data[features]
     data_scaled = scaler.transform(data)
-    prediction = model.predict(data_scaled)
-    return prediction[0] == 1
+    proba = model.predict_proba(data_scaled)[0][1]
+    return proba
 
 
 class TitanicApp(App):
     def build(self):
-        Window.size = (500, 600)
+        Window.size = (500, 700)
         self.title = "Prédiction de survie Titanic"
+        self.historique = []
+        self.dark_mode = False
 
-        main_layout = BoxLayout(orientation="vertical", padding=10, spacing=10)
+        self.main_layout = BoxLayout(orientation="vertical", padding=10, spacing=10)
 
-        # Champs de saisie et sélection
-        # Classe
-        main_layout.add_widget(Label(text="Classe (1, 2 ou 3) :", size_hint_y=None, height=30))
+        # Mode sombre / clair
+        self.mode_toggle = ToggleButton(text="Mode sombre : OFF", size_hint_y=None, height=40)
+        self.mode_toggle.bind(on_press=self.toggle_mode)
+        self.main_layout.add_widget(self.mode_toggle)
+
+        # Champs
         self.pclass_input = Spinner(text="1", values=("1", "2", "3"), size_hint_y=None, height=40)
-        main_layout.add_widget(self.pclass_input)
-
-        # Sexe
-        main_layout.add_widget(Label(text="Sexe :", size_hint_y=None, height=30))
         self.sexe_input = Spinner(text="Homme", values=("Homme", "Femme"), size_hint_y=None, height=40)
-        main_layout.add_widget(self.sexe_input)
-
-        # Age
-        main_layout.add_widget(Label(text="Âge (0-120) :", size_hint_y=None, height=30))
         self.age_input = TextInput(text="30", multiline=False, input_filter="int", size_hint_y=None, height=40)
-        main_layout.add_widget(self.age_input)
-
-        # SibSp
-        main_layout.add_widget(Label(text="Nombre d'amis à bord (0-20) :", size_hint_y=None, height=30))
         self.sibsp_input = TextInput(text="0", multiline=False, input_filter="int", size_hint_y=None, height=40)
-        main_layout.add_widget(self.sibsp_input)
-
-        # Parch
-        main_layout.add_widget(Label(text="Nombre de membres de la famille (0-20) :", size_hint_y=None, height=30))
         self.parch_input = TextInput(text="0", multiline=False, input_filter="int", size_hint_y=None, height=40)
-        main_layout.add_widget(self.parch_input)
-
-        # Ville d'embarquement
-        main_layout.add_widget(Label(text="Ville d'embarquement :", size_hint_y=None, height=30))
         self.embarked_input = Spinner(text="Southampton", values=("Southampton", "Cherbourg", "Queenstown"), size_hint_y=None, height=40)
-        main_layout.add_widget(self.embarked_input)
 
-        # Bouton prédiction
-        self.pred_button = Button(text="Prédire la survie", size_hint_y=None, height=50)
+        for label, widget in [
+            ("Classe (1, 2 ou 3) :", self.pclass_input),
+            ("Sexe :", self.sexe_input),
+            ("Âge (0-120) :", self.age_input),
+            ("Nombre d'amis à bord (0-20) :", self.sibsp_input),
+            ("Nombre de membres de la famille (0-20) :", self.parch_input),
+            ("Ville d'embarquement :", self.embarked_input),
+        ]:
+            self.main_layout.add_widget(Label(text=label, size_hint_y=None, height=30))
+            self.main_layout.add_widget(widget)
+
+        # Boutons
+        bouton_layout = BoxLayout(size_hint_y=None, height=50, spacing=10)
+        self.pred_button = Button(text="Prédire la survie")
         self.pred_button.bind(on_press=self.on_predict)
-        main_layout.add_widget(self.pred_button)
+        bouton_layout.add_widget(self.pred_button)
 
-        # Label résultat
+        self.alea_button = Button(text="Passager aléatoire")
+        self.alea_button.bind(on_press=self.on_random)
+        bouton_layout.add_widget(self.alea_button)
+
+        self.main_layout.add_widget(bouton_layout)
+
         self.result_label = Label(text="", size_hint_y=None, height=120)
-        main_layout.add_widget(self.result_label)
+        self.main_layout.add_widget(self.result_label)
 
-        # Bouton reset
-        self.reset_button = Button(text="Réinitialiser", size_hint_y=None, height=40)
-        self.reset_button.bind(on_press=self.on_reset)
-        main_layout.add_widget(self.reset_button)
+        self.progress_bar = ProgressBar(max=100, value=0, size_hint_y=None, height=20)
+        self.main_layout.add_widget(self.progress_bar)
 
-        return main_layout
+        # Historique
+        self.histo_label = Label(text="Historique des prédictions :", size_hint_y=None, height=30)
+        self.main_layout.add_widget(self.histo_label)
+        self.histo_box = BoxLayout(orientation="vertical", size_hint_y=None)
+        self.histo_box.bind(minimum_height=self.histo_box.setter('height'))
+        scroll = ScrollView(size_hint=(1, None), size=(500, 150))
+        scroll.add_widget(self.histo_box)
+        self.main_layout.add_widget(scroll)
+
+        return self.main_layout
 
     def on_predict(self, instance):
-        # Récupérer et valider les données
         try:
             pclass = int(self.pclass_input.text)
             sexe = 1 if self.sexe_input.text == "Homme" else 0
             age = int(self.age_input.text)
             sibsp = int(self.sibsp_input.text)
             parch = int(self.parch_input.text)
-            embarked_str = self.embarked_input.text
-            if not (1 <= pclass <= 3):
-                raise ValueError("La classe doit être 1, 2 ou 3.")
-            if not (0 <= age <= 120):
-                raise ValueError("L'âge doit être entre 0 et 120.")
-            if not (0 <= sibsp <= 20):
-                raise ValueError("Le nombre d'amis doit être entre 0 et 20.")
-            if not (0 <= parch <= 20):
-                raise ValueError("Le nombre de membres de la famille doit être entre 0 et 20.")
-        except ValueError as e:
-            self.result_label.text = f"Erreur de saisie : {e}"
+            embarked_c, embarked_q = embarked_map[self.embarked_input.text]
+
+            if not (0 <= age <= 120 and 0 <= sibsp <= 20 and 0 <= parch <= 20):
+                raise ValueError("Valeurs hors limites.")
+        except Exception as e:
+            self.result_label.text = f"Erreur : {e}"
             return
 
-        # Map ville vers colonnes embarquées
-        ville_num = {"Southampton": 1, "Cherbourg": 2, "Queenstown": 3}[embarked_str]
-        embarked_c, embarked_q = embarked_map[ville_num]
-
-        survie = predire_survie(pclass, sexe, age, sibsp, parch, embarked_c, embarked_q)
-
+        proba = predire_survie_proba(pclass, sexe, age, sibsp, parch, embarked_c, embarked_q)
+        survie_str = "aurait survécu" if proba >= 0.5 else "n'aurait pas survécu"
         sexe_str = "un homme" if sexe == 1 else "une femme"
-        ville = embarked_str
-        survie_str = "aurait survécu" if survie else "n'aurait pas survécu"
+        ville = self.embarked_input.text
 
-        self.result_label.text = (
-            f"Ce passager était {sexe_str}, de la classe {pclass}.\n"
-            f"Il/elle avait {age} ans, avec {sibsp} amis et {parch} membres de sa famille à bord.\n"
-            f"Il/elle a embarqué à {ville}.\n"
-            f"Selon le modèle, il/elle {survie_str}."
+        texte = (
+            f"Ce passager était {sexe_str}, classe {pclass}, âgé(e) de {age} ans.\n"
+            f"Il/elle avait {sibsp} amis et {parch} membres de famille à bord.\n"
+            f"Embarqué(e) à {ville}.\n"
+            f"Probabilité de survie : {int(proba*100)}% \u2192 Il/elle {survie_str}."
         )
 
-    def on_reset(self, instance):
-        self.pclass_input.text = "1"
-        self.sexe_input.text = "Homme"
-        self.age_input.text = "30"
-        self.sibsp_input.text = "0"
-        self.parch_input.text = "0"
-        self.embarked_input.text = "Southampton"
-        self.result_label.text = ""
+        self.result_label.text = texte
+        self.progress_bar.value = int(proba * 100)
+
+        self.historique.append(texte)
+        self.histo_box.add_widget(Label(text=texte, size_hint_y=None, height=100))
+
+    def on_random(self, instance):
+        self.pclass_input.text = str(random.choice([1, 2, 3]))
+        self.sexe_input.text = random.choice(["Homme", "Femme"])
+        self.age_input.text = str(random.randint(1, 80))
+        self.sibsp_input.text = str(random.randint(0, 5))
+        self.parch_input.text = str(random.randint(0, 5))
+        self.embarked_input.text = random.choice(["Southampton", "Cherbourg", "Queenstown"])
+
+    def toggle_mode(self, instance):
+        self.dark_mode = not self.dark_mode
+        if self.dark_mode:
+            Window.clearcolor = (0.1, 0.1, 0.1, 1)
+            instance.text = "Mode sombre : ON"
+        else:
+            Window.clearcolor = (1, 1, 1, 1)
+            instance.text = "Mode sombre : OFF"
 
 
 if __name__ == "__main__":
